@@ -1,0 +1,275 @@
+networks:
+  bigdata:
+    driver: bridge
+
+volumes:
+  namenode_data:
+  datanode_data:
+  spark_events:
+  airflow_db:
+  jupyter_data:
+  hue_data:
+
+services:
+
+  namenode:
+    build:
+      context: ./hadoop
+      dockerfile: Dockerfile
+    container_name: namenode
+    hostname: namenode
+    networks: [bigdata]
+    ports:
+      - "9870:9870"
+    environment:
+      HADOOP_ROLE: namenode
+    volumes:
+      - namenode_data:/hadoop/dfs/name
+      - ./hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
+      - ./hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml
+      - ./hadoop/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml
+      - ./hadoop/mapred-site.xml:/opt/hadoop/etc/hadoop/mapred-site.xml
+
+  datanode:
+    build:
+      context: ./hadoop
+      dockerfile: Dockerfile
+    container_name: datanode
+    hostname: datanode
+    networks: [bigdata]
+    depends_on: [namenode]
+    ports:
+      - "9864:9864"
+    environment:
+      HADOOP_ROLE: datanode
+    volumes:
+      - datanode_data:/hadoop/dfs/data
+      - ./hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
+      - ./hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml
+      - ./hadoop/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml
+      - ./hadoop/mapred-site.xml:/opt/hadoop/etc/hadoop/mapred-site.xml
+
+  resourcemanager:
+    build:
+      context: ./hadoop
+      dockerfile: Dockerfile
+    container_name: resourcemanager
+    hostname: resourcemanager
+    networks: [bigdata]
+    depends_on: [namenode, datanode]
+    ports:
+      - "8088:8088"
+    environment:
+      HADOOP_ROLE: resourcemanager
+    volumes:
+      - ./hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
+      - ./hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml
+      - ./hadoop/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml
+      - ./hadoop/mapred-site.xml:/opt/hadoop/etc/hadoop/mapred-site.xml
+
+  nodemanager:
+    build:
+      context: ./hadoop
+      dockerfile: Dockerfile
+    container_name: nodemanager
+    hostname: nodemanager
+    networks: [bigdata]
+    depends_on: [resourcemanager]
+    ports:
+      - "8042:8042"
+    environment:
+      HADOOP_ROLE: nodemanager
+    volumes:
+      - ./hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
+      - ./hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml
+      - ./hadoop/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml
+      - ./hadoop/mapred-site.xml:/opt/hadoop/etc/hadoop/mapred-site.xml
+
+  spark-master:
+    image: apache/spark:3.5.1-python3
+    container_name: spark-master
+    hostname: spark-master
+    networks: [bigdata]
+    depends_on: [resourcemanager, nodemanager]
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    environment:
+      HADOOP_CONF_DIR: /opt/spark/conf
+      YARN_CONF_DIR: /opt/spark/conf
+    command: >
+      /opt/spark/bin/spark-class
+      org.apache.spark.deploy.master.Master
+      --host 0.0.0.0
+    volumes:
+      - ./spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./spark/spark-env.sh:/opt/spark/conf/spark-env.sh
+      - ./hadoop/core-site.xml:/opt/spark/conf/core-site.xml
+      - ./hadoop/hdfs-site.xml:/opt/spark/conf/hdfs-site.xml
+      - ./hadoop/yarn-site.xml:/opt/spark/conf/yarn-site.xml
+      - ./jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar:/opt/spark/jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar
+      - spark_events:/opt/spark/spark-events
+
+  spark-worker:
+    image: apache/spark:3.5.1-python3
+    container_name: spark-worker
+    hostname: spark-worker
+    networks: [bigdata]
+    depends_on: [spark-master]
+    environment:
+      HADOOP_CONF_DIR: /opt/spark/conf
+      YARN_CONF_DIR: /opt/spark/conf
+    command: >
+      /opt/spark/bin/spark-class
+      org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077
+    volumes:
+      - ./spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./spark/spark-env.sh:/opt/spark/conf/spark-env.sh
+      - ./hadoop/core-site.xml:/opt/spark/conf/core-site.xml
+      - ./hadoop/hdfs-site.xml:/opt/spark/conf/hdfs-site.xml
+      - ./hadoop/yarn-site.xml:/opt/spark/conf/yarn-site.xml
+      - ./jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar:/opt/spark/jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar
+      - spark_events:/opt/spark/spark-events
+
+  spark-history:
+    image: apache/spark:3.5.1-python3
+    container_name: spark-history
+    hostname: spark-history
+    networks: [bigdata]
+    depends_on: [spark-master]
+    ports:
+      - "18080:18080"
+    command: >
+      /opt/spark/bin/spark-class
+      org.apache.spark.deploy.history.HistoryServer
+    volumes:
+      - spark_events:/opt/spark/spark-events
+      - ./spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./spark/spark-env.sh:/opt/spark/conf/spark-env.sh
+      - ./hadoop/core-site.xml:/opt/spark/conf/core-site.xml
+      - ./hadoop/hdfs-site.xml:/opt/spark/conf/hdfs-site.xml
+
+  hue:
+    image: gethue/hue:latest
+    container_name: hue
+    hostname: hue
+    networks: [ bigdata ]
+    depends_on: [ namenode, resourcemanager ]
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./hue/hue.ini:/usr/share/hue/desktop/conf/z-hue.ini
+
+  airflow-db:
+    image: postgres:15-alpine
+    container_name: airflow-db
+    hostname: airflow-db
+    networks: [bigdata]
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_db:/var/lib/postgresql/data
+
+  airflow-init:
+    image: apache/airflow:2.9.3-python3.11
+    container_name: airflow-init
+    hostname: airflow-init
+    networks: [bigdata]
+    depends_on: [airflow-db]
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+      AIRFLOW__CORE__FERNET_KEY: 46BKJoQYlQPexF0Llrk0n2DWAa1z6qf6NsJKbXGP4Bs=
+      _AIRFLOW_DB_UPGRADE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./hadoop/core-site.xml:/opt/airflow/hadoop/conf/core-site.xml
+      - ./hadoop/hdfs-site.xml:/opt/airflow/hadoop/conf/hdfs-site.xml
+      - ./hadoop/yarn-site.xml:/opt/airflow/hadoop/conf/yarn-site.xml
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - airflow db upgrade && airflow users create --username admin --password admin
+        --firstname Admin --lastname User --role Admin --email admin@example.com || true
+
+  airflow-webserver:
+    image: apache/airflow:2.9.3-python3.11
+    container_name: airflow-webserver
+    hostname: airflow-webserver
+    networks: [bigdata]
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    ports:
+      - "8081:8080"
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+      AIRFLOW__CORE__FERNET_KEY: 46BKJoQYlQPexF0Llrk0n2DWAa1z6qf6NsJKbXGP4Bs=
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./hadoop/core-site.xml:/opt/airflow/hadoop/conf/core-site.xml
+      - ./hadoop/hdfs-site.xml:/opt/airflow/hadoop/conf/hdfs-site.xml
+      - ./hadoop/yarn-site.xml:/opt/airflow/hadoop/conf/yarn-site.xml
+    command: webserver
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.3-python3.11
+    container_name: airflow-scheduler
+    hostname: airflow-scheduler
+    networks: [bigdata]
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+      AIRFLOW__CORE__FERNET_KEY: 46BKJoQYlQPexF0Llrk0n2DWAa1z6qf6NsJKbXGP4Bs=
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./hadoop/core-site.xml:/opt/airflow/hadoop/conf/core-site.xml
+      - ./hadoop/hdfs-site.xml:/opt/airflow/hadoop/conf/hdfs-site.xml
+      - ./hadoop/yarn-site.xml:/opt/airflow/hadoop/conf/yarn-site.xml
+    command: scheduler
+
+  jupyter:
+    build:
+      context: ./jupyter
+      dockerfile: Dockerfile
+    container_name: jupyter
+    hostname: jupyter
+    networks: [bigdata]
+    depends_on: [namenode, datanode, resourcemanager, nodemanager, spark-master]
+    ports:
+      - "8889:8888"
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+      HADOOP_CONF_DIR: /etc/hadoop/conf
+      PYSPARK_SUBMIT_ARGS: >-
+        --master yarn
+        --deploy-mode client
+        --num-executors 2
+        --executor-cores 2
+        --executor-memory 2g
+        --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+        --conf spark.sql.catalog.iceberg=org.apache.iceberg.spark.SparkCatalog
+        --conf spark.sql.catalog.iceberg.type=hadoop
+        --conf spark.sql.catalog.iceberg.warehouse=hdfs://namenode:9000/warehouse
+        --packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2
+        pyspark-shell
+    volumes:
+      - jupyter_data:/home/jovyan/work
+      - ./hadoop/core-site.xml:/etc/hadoop/conf/core-site.xml
+      - ./hadoop/hdfs-site.xml:/etc/hadoop/conf/hdfs-site.xml
+      - ./hadoop/yarn-site.xml:/etc/hadoop/conf/yarn-site.xml
+      - ./jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar:/usr/local/spark/jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar
+    command: >
+      bash -c "start-notebook.sh --NotebookApp.token='' --NotebookApp.password=''"

@@ -9,4 +9,13 @@
         <name>hadoop.tmp.dir</name>
         <value>/hadoop/tmp</value>
     </property>
+    <!-- Hue impersonation -->
+    <property>
+        <name>hadoop.proxyuser.hue.hosts</name>
+        <value>*</value>
+    </property>
+    <property>
+        <name>hadoop.proxyuser.hue.groups</name>
+        <value>*</value>
+    </property>
 </configuration>

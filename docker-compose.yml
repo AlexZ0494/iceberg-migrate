@@ -9,6 +9,7 @@ volumes:
   airflow_db:
   jupyter_data:
   hue_data:
+  nessie_data:
 
 services:
 
@@ -85,12 +86,46 @@ services:
       - ./hadoop/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml
       - ./hadoop/mapred-site.xml:/opt/hadoop/etc/hadoop/mapred-site.xml
 
+  # ─────────────────────────── Nessie ───────────────────────────
+  nessie:
+    image: ghcr.io/projectnessie/nessie:latest
+    container_name: nessie
+    hostname: nessie
+    networks: [ bigdata ]
+    user: "0:0"
+    ports:
+      - "19120:19120"
+    environment:
+      QUARKUS_HTTP_PORT: "19120"
+      NESSIE_VERSION_STORE_TYPE: "ROCKSDB"
+      NESSIE_VERSION_STORE_PERSIST_ROCKS_DATABASE_PATH: "/nessie/data"
+    volumes:
+      - nessie_data:/nessie/data
+
+  # ─────────────────────────── Trino ──────────────────────────────
+  trino:
+    image: trinodb/trino:latest
+    container_name: trino
+    hostname: trino
+    networks: [ bigdata ]
+    depends_on: [ namenode, datanode, nessie ]
+    ports:
+      - "8082:8080"
+    environment:
+      HADOOP_CONF_DIR: /etc/hadoop/conf
+    volumes:
+      - ./trino/config.properties:/etc/trino/config.properties
+      - ./trino/catalog/iceberg.properties:/etc/trino/catalog/iceberg.properties
+      - ./hadoop/core-site.xml:/etc/hadoop/conf/core-site.xml
+      - ./hadoop/hdfs-site.xml:/etc/hadoop/conf/hdfs-site.xml
+
+  # ─────────────────────────── Spark ──────────────────────────────
   spark-master:
     image: apache/spark:3.5.1-python3
     container_name: spark-master
     hostname: spark-master
     networks: [bigdata]
-    depends_on: [resourcemanager, nodemanager]
+    depends_on: [resourcemanager, nodemanager, nessie]
     ports:
       - "7077:7077"
       - "8080:8080"
@@ -150,17 +185,21 @@ services:
       - ./hadoop/core-site.xml:/opt/spark/conf/core-site.xml
       - ./hadoop/hdfs-site.xml:/opt/spark/conf/hdfs-site.xml
 
+  # ─────────────────────────── Hue ───────────────────────────────
   hue:
-    image: gethue/hue:latest
+    build:
+      context: ./hue
+      dockerfile: Dockerfile
     container_name: hue
     hostname: hue
-    networks: [ bigdata ]
-    depends_on: [ namenode, resourcemanager ]
+    networks: [bigdata]
+    depends_on: [namenode, resourcemanager, trino]
     ports:
       - "8888:8888"
     volumes:
       - ./hue/hue.ini:/usr/share/hue/desktop/conf/z-hue.ini
 
+  # ─────────────────────────── Airflow ────────────────────────────
   airflow-db:
     image: postgres:15-alpine
     container_name: airflow-db
@@ -240,6 +279,7 @@ services:
       - ./hadoop/yarn-site.xml:/opt/airflow/hadoop/conf/yarn-site.xml
     command: scheduler
 
+  # ─────────────────────────── Jupyter ───────────────────────────
   jupyter:
     build:
       context: ./jupyter
@@ -247,7 +287,7 @@ services:
     container_name: jupyter
     hostname: jupyter
     networks: [bigdata]
-    depends_on: [namenode, datanode, resourcemanager, nodemanager, spark-master]
+    depends_on: [namenode, datanode, resourcemanager, nodemanager, spark-master, nessie]
     ports:
       - "8889:8888"
     environment:
@@ -261,7 +301,9 @@ services:
         --executor-memory 2g
         --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
         --conf spark.sql.catalog.iceberg=org.apache.iceberg.spark.SparkCatalog
-        --conf spark.sql.catalog.iceberg.type=hadoop
+        --conf spark.sql.catalog.iceberg.catalog-impl=org.apache.iceberg.nessie.NessieCatalog
+        --conf spark.sql.catalog.iceberg.uri=http://nessie:19120/api/v2
+        --conf spark.sql.catalog.iceberg.ref=main
         --conf spark.sql.catalog.iceberg.warehouse=hdfs://namenode:9000/warehouse
         --packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2
         pyspark-shell

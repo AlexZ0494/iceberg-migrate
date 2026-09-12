@@ -56,8 +56,8 @@ services:
       dockerfile: Dockerfile
     container_name: resourcemanager
     hostname: resourcemanager
-    networks: [bigdata]
-    depends_on: [namenode, datanode]
+    networks: [ bigdata ]
+    depends_on: [ namenode, datanode ]
     ports:
       - "8088:8088"
     environment:
@@ -204,7 +204,7 @@ services:
     image: postgres:15-alpine
     container_name: airflow-db
     hostname: airflow-db
-    networks: [bigdata]
+    networks: [ bigdata ]
     environment:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
@@ -290,23 +290,10 @@ services:
     depends_on: [namenode, datanode, resourcemanager, nodemanager, spark-master, nessie]
     ports:
       - "8889:8888"
+      - "4040:4040"
     environment:
       JUPYTER_ENABLE_LAB: "yes"
       HADOOP_CONF_DIR: /etc/hadoop/conf
-      PYSPARK_SUBMIT_ARGS: >-
-        --master yarn
-        --deploy-mode client
-        --num-executors 2
-        --executor-cores 2
-        --executor-memory 2g
-        --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
-        --conf spark.sql.catalog.iceberg=org.apache.iceberg.spark.SparkCatalog
-        --conf spark.sql.catalog.iceberg.catalog-impl=org.apache.iceberg.nessie.NessieCatalog
-        --conf spark.sql.catalog.iceberg.uri=http://nessie:19120/api/v2
-        --conf spark.sql.catalog.iceberg.ref=main
-        --conf spark.sql.catalog.iceberg.warehouse=hdfs://namenode:9000/warehouse
-        --packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2
-        pyspark-shell
     volumes:
       - jupyter_data:/home/jovyan/work
       - ./hadoop/core-site.xml:/etc/hadoop/conf/core-site.xml

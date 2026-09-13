@@ -3,302 +3,312 @@ networks:
     driver: bridge
 
 volumes:
-  namenode_data:
-  datanode_data:
-  spark_events:
-  airflow_db:
-  jupyter_data:
-  hue_data:
-  nessie_data:
+  namenode:
+  datanode:
+  airflow-db:
+  hive-metastore-db:
+  spark-events:
 
 services:
 
+  # ═══════════════════════════════════════════
+  #  HDFS
+  # ═══════════════════════════════════════════
+
   namenode:
-    build:
-      context: ./hadoop
-      dockerfile: Dockerfile
+    build: ./hadoop
     container_name: namenode
     hostname: namenode
     networks: [bigdata]
+    command: namenode
     ports:
       - "9870:9870"
-    environment:
-      HADOOP_ROLE: namenode
+      - "9000:9000"
     volumes:
-      - namenode_data:/hadoop/dfs/name
-      - ./hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
-      - ./hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml
-      - ./hadoop/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml
-      - ./hadoop/mapred-site.xml:/opt/hadoop/etc/hadoop/mapred-site.xml
+      - namenode:/opt/hadoop/data/nameNode
+    environment:
+      - HADOOP_HOME=/opt/hadoop
+      - JAVA_HOME=/opt/java/openjdk
+      - HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
 
   datanode:
-    build:
-      context: ./hadoop
-      dockerfile: Dockerfile
+    build: ./hadoop
     container_name: datanode
     hostname: datanode
     networks: [bigdata]
+    command: datanode
     depends_on: [namenode]
     ports:
       - "9864:9864"
-    environment:
-      HADOOP_ROLE: datanode
     volumes:
-      - datanode_data:/hadoop/dfs/data
-      - ./hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
-      - ./hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml
-      - ./hadoop/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml
-      - ./hadoop/mapred-site.xml:/opt/hadoop/etc/hadoop/mapred-site.xml
+      - datanode:/opt/hadoop/data/dataNode
+      - ./hadoop/conf:/opt/hadoop/etc/hadoop
+    environment:
+      - HADOOP_HOME=/opt/hadoop
+      - JAVA_HOME=/opt/java/openjdk
+
+  # ═══════════════════════════════════════════
+  #  YARN
+  # ═══════════════════════════════════════════
 
   resourcemanager:
-    build:
-      context: ./hadoop
-      dockerfile: Dockerfile
+    build: ./hadoop
     container_name: resourcemanager
     hostname: resourcemanager
-    networks: [ bigdata ]
-    depends_on: [ namenode, datanode ]
+    networks: [bigdata]
+    command: resourcemanager
+    depends_on: [namenode, datanode]
     ports:
       - "8088:8088"
-    environment:
-      HADOOP_ROLE: resourcemanager
+      - "19888:19888"
     volumes:
-      - ./hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
-      - ./hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml
-      - ./hadoop/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml
-      - ./hadoop/mapred-site.xml:/opt/hadoop/etc/hadoop/mapred-site.xml
+      - ./hadoop/conf:/opt/hadoop/etc/hadoop
+    environment:
+      - HADOOP_HOME=/opt/hadoop
+      - JAVA_HOME=/opt/java/openjdk
+      - HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
 
   nodemanager:
-    build:
-      context: ./hadoop
-      dockerfile: Dockerfile
+    build: ./hadoop
     container_name: nodemanager
     hostname: nodemanager
     networks: [bigdata]
+    command: nodemanager
     depends_on: [resourcemanager]
     ports:
       - "8042:8042"
-    environment:
-      HADOOP_ROLE: nodemanager
     volumes:
-      - ./hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
-      - ./hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml
-      - ./hadoop/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml
-      - ./hadoop/mapred-site.xml:/opt/hadoop/etc/hadoop/mapred-site.xml
+      - ./hadoop/conf:/opt/hadoop/etc/hadoop
+    environment:
+      - HADOOP_HOME=/opt/hadoop
+      - JAVA_HOME=/opt/java/openjdk
+      - HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
 
-  # ─────────────────────────── Nessie ───────────────────────────
+  # ═══════════════════════════════════════════
+  #  Spark History Server
+  # ═══════════════════════════════════════════
+
+  spark-history:
+    build: ./spark-history
+    container_name: spark-history
+    hostname: spark-history
+    networks: [bigdata]
+    depends_on: [namenode, datanode]
+    ports:
+      - "18080:18080"
+    volumes:
+      - ./hadoop/conf:/opt/hadoop/etc/hadoop
+      - spark-events:/opt/spark/events
+    environment:
+      SPARK_HISTORY_OPTS: "-Dspark.history.fs.logDirectory=hdfs://namenode:9000/spark-events"
+
+  # ═══════════════════════════════════════════
+  #  Nessie (Iceberg Catalog)
+  # ═══════════════════════════════════════════
+
   nessie:
-    image: ghcr.io/projectnessie/nessie:latest
+    image: projectnessie/nessie:latest
     container_name: nessie
     hostname: nessie
-    networks: [ bigdata ]
-    user: "0:0"
+    networks: [bigdata]
     ports:
       - "19120:19120"
     environment:
-      QUARKUS_HTTP_PORT: "19120"
-      NESSIE_VERSION_STORE_TYPE: "ROCKSDB"
-      NESSIE_VERSION_STORE_PERSIST_ROCKS_DATABASE_PATH: "/nessie/data"
-    volumes:
-      - nessie_data:/nessie/data
+      - QUARKUS_HTTP_PORT=19120
 
-  # ─────────────────────────── Trino ──────────────────────────────
+  # ═══════════════════════════════════════════
+  #  Hive Metastore DB
+  # ═══════════════════════════════════════════
+
+  hive-metastore-db:
+    image: postgres:15
+    container_name: hive-metastore-db
+    hostname: hive-metastore-db
+    networks: [bigdata]
+    environment:
+      POSTGRES_DB: metastore
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+    volumes:
+      - hive-metastore-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hive -d metastore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ═══════════════════════════════════════════
+  #  Hive Metastore
+  # ═══════════════════════════════════════════
+
+  hive-metastore:
+    image: apache/hive:4.0.1
+    container_name: hive-metastore
+    hostname: hive-metastore
+    networks: [bigdata]
+    depends_on:
+      namenode: { condition: service_started }
+      hive-metastore-db: { condition: service_healthy }
+    environment:
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionURL: "jdbc:postgresql://hive-metastore-db/metastore"
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionDriverName: "org.postgresql.Driver"
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionUserName: "hive"
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionPassword: "hive"
+      HIVE_SITE_CONF_datanucleus_schema_autoCreateAll: "true"
+      HIVE_SITE_CONF_hive_metastore_uris: "thrift://hive-metastore:9083"
+      HIVE_SITE_CONF_hive_metastore_warehouse_dir: "hdfs://namenode:9000/user/hive/warehouse"
+      SERVICE_NAME: "metastore"
+    ports:
+      - "9083:9083"
+
+  # ═══════════════════════════════════════════
+  #  HiveServer2
+  # ═══════════════════════════════════════════
+
+  hive-server2:
+    image: apache/hive:4.0.1
+    container_name: hive-server2
+    hostname: hive-server2
+    networks: [bigdata]
+    depends_on:
+      hive-metastore: { condition: service_started }
+    environment:
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionURL: "jdbc:postgresql://hive-metastore-db/metastore"
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionDriverName: "org.postgresql.Driver"
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionUserName: "hive"
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionPassword: "hive"
+      HIVE_SITE_CONF_hive_metastore_uris: "thrift://hive-metastore:9083"
+      HIVE_SITE_CONF_hive_metastore_warehouse_dir: "hdfs://namenode:9000/user/hive/warehouse"
+      HIVE_SITE_CONF_hive_server2_thrift_bind_host: "0.0.0.0"
+      SERVICE_NAME: "hiveserver2"
+    ports:
+      - "10000:10000"
+      - "10002:10002"
+
+  # ═══════════════════════════════════════════
+  #  Trino
+  # ═══════════════════════════════════════════
+
   trino:
     image: trinodb/trino:latest
     container_name: trino
     hostname: trino
-    networks: [ bigdata ]
-    depends_on: [ namenode, datanode, nessie ]
+    networks: [bigdata]
+    depends_on: [namenode, datanode, hive-metastore, nessie]
     ports:
       - "8082:8080"
-    environment:
-      HADOOP_CONF_DIR: /etc/hadoop/conf
     volumes:
-      - ./trino/config.properties:/etc/trino/config.properties
-      - ./trino/catalog/iceberg.properties:/etc/trino/catalog/iceberg.properties
-      - ./hadoop/core-site.xml:/etc/hadoop/conf/core-site.xml
-      - ./hadoop/hdfs-site.xml:/etc/hadoop/conf/hdfs-site.xml
+      - ./trino/etc:/etc/trino
+      - ./trino/catalog:/etc/trino/catalog
+      - ./hadoop/conf:/etc/hadoop:ro
 
-  # ─────────────────────────── Spark ──────────────────────────────
-  spark-master:
-    image: apache/spark:3.5.1-python3
-    container_name: spark-master
-    hostname: spark-master
-    networks: [bigdata]
-    depends_on: [resourcemanager, nodemanager, nessie]
-    ports:
-      - "7077:7077"
-      - "8080:8080"
-    environment:
-      HADOOP_CONF_DIR: /opt/spark/conf
-      YARN_CONF_DIR: /opt/spark/conf
-    command: >
-      /opt/spark/bin/spark-class
-      org.apache.spark.deploy.master.Master
-      --host 0.0.0.0
-    volumes:
-      - ./spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
-      - ./spark/spark-env.sh:/opt/spark/conf/spark-env.sh
-      - ./hadoop/core-site.xml:/opt/spark/conf/core-site.xml
-      - ./hadoop/hdfs-site.xml:/opt/spark/conf/hdfs-site.xml
-      - ./hadoop/yarn-site.xml:/opt/spark/conf/yarn-site.xml
-      - ./jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar:/opt/spark/jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar
-      - spark_events:/opt/spark/spark-events
+  # ═══════════════════════════════════════════
+  #  Hue
+  # ═══════════════════════════════════════════
 
-  spark-worker:
-    image: apache/spark:3.5.1-python3
-    container_name: spark-worker
-    hostname: spark-worker
-    networks: [bigdata]
-    depends_on: [spark-master]
-    environment:
-      HADOOP_CONF_DIR: /opt/spark/conf
-      YARN_CONF_DIR: /opt/spark/conf
-    command: >
-      /opt/spark/bin/spark-class
-      org.apache.spark.deploy.worker.Worker
-      spark://spark-master:7077
-    volumes:
-      - ./spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
-      - ./spark/spark-env.sh:/opt/spark/conf/spark-env.sh
-      - ./hadoop/core-site.xml:/opt/spark/conf/core-site.xml
-      - ./hadoop/hdfs-site.xml:/opt/spark/conf/hdfs-site.xml
-      - ./hadoop/yarn-site.xml:/opt/spark/conf/yarn-site.xml
-      - ./jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar:/opt/spark/jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar
-      - spark_events:/opt/spark/spark-events
-
-  spark-history:
-    image: apache/spark:3.5.1-python3
-    container_name: spark-history
-    hostname: spark-history
-    networks: [bigdata]
-    depends_on: [spark-master]
-    ports:
-      - "18080:18080"
-    command: >
-      /opt/spark/bin/spark-class
-      org.apache.spark.deploy.history.HistoryServer
-    volumes:
-      - spark_events:/opt/spark/spark-events
-      - ./spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
-      - ./spark/spark-env.sh:/opt/spark/conf/spark-env.sh
-      - ./hadoop/core-site.xml:/opt/spark/conf/core-site.xml
-      - ./hadoop/hdfs-site.xml:/opt/spark/conf/hdfs-site.xml
-
-  # ─────────────────────────── Hue ───────────────────────────────
   hue:
-    build:
-      context: ./hue
-      dockerfile: Dockerfile
+    build: ./hue
     container_name: hue
     hostname: hue
     networks: [bigdata]
-    depends_on: [namenode, resourcemanager, trino]
+    depends_on: [airflow-db, namenode, resourcemanager, trino, hive-server2]
     ports:
       - "8888:8888"
     volumes:
       - ./hue/hue.ini:/usr/share/hue/desktop/conf/z-hue.ini
 
-  # ─────────────────────────── Airflow ────────────────────────────
+  # ═══════════════════════════════════════════
+  #  Jupyter (PySpark + Iceberg)
+  # ═══════════════════════════════════════════
+
+  jupyter:
+    build: ./jupyter
+    container_name: jupyter
+    hostname: jupyter
+    networks: [bigdata]
+    depends_on: [namenode, datanode, nessie, hive-metastore]
+    ports:
+      - "8889:8888"
+    volumes:
+      - ./jupyter/work:/home/jovyan/work
+      - ./hadoop/conf:/opt/hadoop/etc/hadoop:ro
+      - spark-events:/opt/spark/events
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+
+  # ═══════════════════════════════════════════
+  #  Airflow
+  # ═══════════════════════════════════════════
+
   airflow-db:
-    image: postgres:15-alpine
+    image: postgres:15
     container_name: airflow-db
     hostname: airflow-db
-    networks: [ bigdata ]
+    networks: [bigdata]
     environment:
+      POSTGRES_DB: airflow
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
     volumes:
-      - airflow_db:/var/lib/postgresql/data
+      - airflow-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   airflow-init:
-    image: apache/airflow:2.9.3-python3.11
+    build: ./airflow
     container_name: airflow-init
     hostname: airflow-init
     networks: [bigdata]
-    depends_on: [airflow-db]
+    depends_on:
+      airflow-db: { condition: service_healthy }
     environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow"
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
-      AIRFLOW__CORE__FERNET_KEY: 46BKJoQYlQPexF0Llrk0n2DWAa1z6qf6NsJKbXGP4Bs=
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__WEB_SERVER_PORT: "8081"
       _AIRFLOW_DB_UPGRADE: "true"
       _AIRFLOW_WWW_USER_CREATE: "true"
       _AIRFLOW_WWW_USER_USERNAME: admin
       _AIRFLOW_WWW_USER_PASSWORD: admin
     volumes:
       - ./airflow/dags:/opt/airflow/dags
-      - ./hadoop/core-site.xml:/opt/airflow/hadoop/conf/core-site.xml
-      - ./hadoop/hdfs-site.xml:/opt/airflow/hadoop/conf/hdfs-site.xml
-      - ./hadoop/yarn-site.xml:/opt/airflow/hadoop/conf/yarn-site.xml
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - airflow db upgrade && airflow users create --username admin --password admin
-        --firstname Admin --lastname User --role Admin --email admin@example.com || true
+    entrypoint: /bin/bash -c "airflow db upgrade && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true"
 
   airflow-webserver:
-    image: apache/airflow:2.9.3-python3.11
+    build: ./airflow
     container_name: airflow-webserver
     hostname: airflow-webserver
     networks: [bigdata]
     depends_on:
-      airflow-init:
-        condition: service_completed_successfully
+      airflow-init: { condition: service_completed_successfully }
     ports:
-      - "8081:8080"
+      - "8081:8081"
     environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow"
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
-      AIRFLOW__CORE__FERNET_KEY: 46BKJoQYlQPexF0Llrk0n2DWAa1z6qf6NsJKbXGP4Bs=
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__WEB_SERVER_PORT: "8081"
+      AIRFLOW_CONN_TRINO_DEFAULT: "trino://trino:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
-      - ./hadoop/core-site.xml:/opt/airflow/hadoop/conf/core-site.xml
-      - ./hadoop/hdfs-site.xml:/opt/airflow/hadoop/conf/hdfs-site.xml
-      - ./hadoop/yarn-site.xml:/opt/airflow/hadoop/conf/yarn-site.xml
     command: webserver
 
   airflow-scheduler:
-    image: apache/airflow:2.9.3-python3.11
+    build: ./airflow
     container_name: airflow-scheduler
     hostname: airflow-scheduler
     networks: [bigdata]
     depends_on:
-      airflow-init:
-        condition: service_completed_successfully
+      airflow-init: { condition: service_completed_successfully }
     environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow"
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
-      AIRFLOW__CORE__FERNET_KEY: 46BKJoQYlQPexF0Llrk0n2DWAa1z6qf6NsJKbXGP4Bs=
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__WEB_SERVER_PORT: "8081"
+      AIRFLOW_CONN_TRINO_DEFAULT: "trino://trino:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
-      - ./hadoop/core-site.xml:/opt/airflow/hadoop/conf/core-site.xml
-      - ./hadoop/hdfs-site.xml:/opt/airflow/hadoop/conf/hdfs-site.xml
-      - ./hadoop/yarn-site.xml:/opt/airflow/hadoop/conf/yarn-site.xml
     command: scheduler
-
-  # ─────────────────────────── Jupyter ───────────────────────────
-  jupyter:
-    build:
-      context: ./jupyter
-      dockerfile: Dockerfile
-    container_name: jupyter
-    hostname: jupyter
-    networks: [bigdata]
-    depends_on: [namenode, datanode, resourcemanager, nodemanager, spark-master, nessie]
-    ports:
-      - "8889:8888"
-      - "4040:4040"
-    environment:
-      JUPYTER_ENABLE_LAB: "yes"
-      HADOOP_CONF_DIR: /etc/hadoop/conf
-    volumes:
-      - jupyter_data:/home/jovyan/work
-      - ./hadoop/core-site.xml:/etc/hadoop/conf/core-site.xml
-      - ./hadoop/hdfs-site.xml:/etc/hadoop/conf/hdfs-site.xml
-      - ./hadoop/yarn-site.xml:/etc/hadoop/conf/yarn-site.xml
-      - ./jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar:/usr/local/spark/jars/iceberg-spark-runtime-3.5_2.12-1.5.2.jar
-    command: >
-      bash -c "start-notebook.sh --NotebookApp.token='' --NotebookApp.password=''"

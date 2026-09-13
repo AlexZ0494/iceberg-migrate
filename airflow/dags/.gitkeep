@@ -1,0 +1,2 @@
+mkdir airflow\dags
+echo. > airflow\dags\.gitkeep

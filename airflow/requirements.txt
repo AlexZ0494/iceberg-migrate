@@ -1,5 +1,5 @@
+apache-airflow[postgres]
 apache-airflow-providers-trino
-pandas
-pyarrow
 trino
 psycopg2
+asyncpg

@@ -275,8 +275,8 @@ services:
       _AIRFLOW_WWW_USER_PASSWORD: admin
     volumes:
       - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/dags:/opt/airflow/jobs
-    entrypoint: /bin/bash -c "airflow db migrate && airflow users create --username admin --password admin --role Admin -e admin@example.com || true"
+      - ./airflow/jobs:/opt/airflow/jobs
+    entrypoint: /bin/bash -c "airflow db migrate"
   airflow-webserver:
     build: ./airflow
     container_name: airflow-webserver
@@ -294,8 +294,8 @@ services:
       AIRFLOW_CONN_TRINO_DEFAULT: "trino://trino:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/dags:/opt/airflow/jobs
-    command: webserver
+      - ./airflow/jobs:/opt/airflow/jobs
+    command: ["airflow", "api-server"]
 
   airflow-scheduler:
     build: ./airflow
@@ -312,5 +312,5 @@ services:
       AIRFLOW_CONN_TRINO_DEFAULT: "trino://trino:8080"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/dags:/opt/airflow/jobs
-    command: scheduler
+      - ./airflow/jobs:/opt/airflow/jobs
+    command: ["airflow", "scheduler"]

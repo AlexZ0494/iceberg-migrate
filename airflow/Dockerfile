@@ -13,6 +13,7 @@ WORKDIR /opt/airflow
 USER root
 # Копируем и ставим зависимости
 COPY requirements.txt .
+RUN pip install --no-cache-dir apache-airflow-providers-apache-spark
 RUN pip install --no-cache-dir -r requirements.txt
 # Меняем владельца и переключаемся на пользователя
 RUN chown -R airflow: /opt/airflow

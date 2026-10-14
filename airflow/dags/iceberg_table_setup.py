@@ -18,12 +18,12 @@ default_args = {
 }
 
 with DAG(
-    dag_id="iceberg_table_setup",
+    dag_id="iceberg_merge_pipeline",
     default_args=default_args,
-    schedule_interval=None,  # запускается вручную или по триггеру
+    schedule="0 */2 * * *",   # вместо schedule_interval
     start_date=datetime(2025, 9, 1),
     catchup=False,
-    tags=["iceberg", "ddl"],
+    tags=["iceberg", "merge", "mor"],
 ) as dag:
 
     # Шаг 1: создание таблицы со скрытым партиционированием

@@ -21,7 +21,7 @@ default_args = {
 with DAG(
     dag_id="iceberg_merge_pipeline",
     default_args=default_args,
-    schedule_interval="0 */2 * * *",  # каждые 2 часа
+    schedule="0 */2 * * *",   # вместо schedule_interval
     start_date=datetime(2025, 9, 1),
     catchup=False,
     tags=["iceberg", "merge", "mor"],

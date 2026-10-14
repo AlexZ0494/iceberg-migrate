@@ -266,9 +266,10 @@ services:
       airflow-db: { condition: service_healthy }
     environment:
       AIRFLOW__CORE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow"
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__WEBSERVER__WEB_SERVER_PORT: "8081"
+      AIRFLOW__CORE__HOSTNAME_CALLABLE: airflow.utils.net_host_ip_address
       _AIRFLOW_DB_UPGRADE: "true"
       _AIRFLOW_WWW_USER_CREATE: "true"
       _AIRFLOW_WWW_USER_USERNAME: admin
@@ -288,10 +289,15 @@ services:
       - "8081:8081"
     environment:
       AIRFLOW__CORE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow"
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__WEBSERVER__WEB_SERVER_PORT: "8081"
+      AIRFLOW__CORE__HOSTNAME_CALLABLE: airflow.utils.net_host_ip_address
       AIRFLOW_CONN_TRINO_DEFAULT: "trino://trino:8080"
+      AIRFLOW__CORE__DAGS_FOLDER: "/opt/airflow/dags"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/jobs:/opt/airflow/jobs
@@ -306,11 +312,36 @@ services:
       airflow-init: { condition: service_completed_successfully }
     environment:
       AIRFLOW__CORE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow"
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__WEBSERVER__WEB_SERVER_PORT: "8081"
       AIRFLOW_CONN_TRINO_DEFAULT: "trino://trino:8080"
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: "0"
+      AIRFLOW__CORE__DAG_DIR_LIST_INTERVAL: "5.0"
+      AIRFLOW__CORE__DAGS_FOLDER: "/opt/airflow/dags"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/jobs:/opt/airflow/jobs
     command: ["airflow", "scheduler"]
+
+  airflow-dag-processor:
+    build: ./airflow
+    container_name: airflow-dag-processor
+    hostname: airflow-dag-processor
+    networks: [ bigdata ]
+    depends_on:
+      airflow-init: { condition: service_completed_successfully }
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow"
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: "/opt/airflow/dags"
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: "0"
+      AIRFLOW__CORE__DAG_DIR_LIST_INTERVAL: "5.0"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/jobs:/opt/airflow/jobs
+    command: [ "airflow", "dag-processor" ]

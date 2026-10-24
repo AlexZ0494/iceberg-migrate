@@ -9,7 +9,6 @@
 |Nessie API|http://localhost:19120/|                                                                           |
 |Trino UI|http://localhost:8082/| Вход по логину admin                                                      |
 |Hue|http://localhost:8888/| Так-как при первом билде docker-compose то логин и пароль нужно придумать |
-|Airflow|http://localhost:8081/| Логин и пароль admin                                                      |
 |Jupyter|http://localhost:8889/||
 |Spark Master|http://localhost:8080/||
 |HDFS NameNode|http://localhost:9870/||
@@ -22,26 +21,28 @@
 ````bash 
 git clone https://github.com/AlexZ0494/iceberg-migrate.git
 ````
-2. Перейти в склонированную директорию и выполнить:
-````bash
-docker compose up -d --build
-````
-3. После развертывания проекта подождать от 1 до 3 минут чтобы все сервисы поднялись и выполнить следующее:
-````bash
-docker exec namenode hdfs dfs -mkdir -p /user/hive/warehouse
-docker exec namenode hdfs dfs -mkdir -p /warehouse
-docker exec namenode hdfs dfs -mkdir -p /spark-events
-docker exec namenode hdfs dfs -chmod -R 777 /user/hive /warehouse /spark-events
-````
-
-Или использовать уже собранный shell-скрипт для развертывания проекта
+2. Перейти в склонированную директорию и запустить атоматический сборщик docker-compose:
 Для Windows:
 ````bash
 powershell -ExecutionPolicy Bypass -File .\start.ps1
 ````
+По параметрам запуска:
+1. .\start.ps1          # запустить кластер
+2. .\start.ps1 stop     # остановить
+3. .\start.ps1 restart  # перезапустить
+4. .\start.ps1 logs     # логи
+5. .\start.ps1 status   # статус
+6. .\start.ps1 clean    # удалить всё
 Для Linux:
 ````bash
 chmod +x start.sh
 ./start.sh
 ````
-
+По параметрам запуска:
+1. ./start.sh          # запустить кластер
+2. ./start.sh stop     # остановить
+3. ./start.sh restart  # перезапустить
+4. ./start.sh logs     # логи (опционально: ./start.sh logs trino)
+5. ./start.sh status   # статус всех сервисов
+6. ./start.sh clean    # удалить всё
+7. ./start.sh help     # справка

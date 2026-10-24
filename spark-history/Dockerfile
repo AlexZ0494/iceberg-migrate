@@ -10,4 +10,4 @@ EXPOSE 18080
 
 USER ${NB_UID}
 
-CMD ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.history.HistoryServer"]
+CMD ["/usr/local/spark/bin/spark-class", "org.apache.spark.deploy.history.HistoryServer"]

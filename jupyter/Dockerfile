@@ -22,4 +22,7 @@ ENV PYSPARK_DRIVER_PYTHON=python3
 # Преднастроенный init-скрипт для SparkSession
 COPY --chown=${NB_UID}:${NB_GID} init_spark.py /home/jovyan/work/init_spark.py
 
+# Отключаем токен, разрешаем вход без пароля
+RUN pip install jupyter_server 2>/dev/null || true
+
 USER ${NB_UID}

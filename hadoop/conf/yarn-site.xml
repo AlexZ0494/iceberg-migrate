@@ -51,4 +51,13 @@
         <name>yarn.scheduler.capacity.root.default.maximum-capacity</name>
         <value>100</value>
     </property>
+    <!-- Disable CSRF filter for YARN ResourceManager UI -->
+    <property>
+        <name>yarn.http.policy</name>
+        <value>HTTP_ONLY</value>
+    </property>
+    <property>
+        <name>yarn.resourcemanager.webapp.cross-origin.enabled</name>
+        <value>true</value>
+    </property>
 </configuration>

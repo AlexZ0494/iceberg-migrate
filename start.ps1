@@ -67,11 +67,27 @@ function Start-Cluster {
     docker exec namenode /opt/hadoop/bin/hdfs dfs -mkdir -p /user/hive/warehouse
     docker exec namenode /opt/hadoop/bin/hdfs dfs -mkdir -p /warehouse
     docker exec namenode /opt/hadoop/bin/hdfs dfs -mkdir -p /spark-events
-    docker exec namenode /opt/hadoop/bin/hdfs dfs -chmod -R 777 /user/hive /warehouse /spark-events
+    docker exec namenode /opt/hadoop/bin/hdfs dfs -mkdir -p /spark-logs
+    docker exec namenode /opt/hadoop/bin/hdfs dfs -chmod -R 777 /user/hive /warehouse /spark-events /spark-logs
     Write-Ok "HDFS-директории созданы"
 
-    Write-Step "Ожидание сервисов (до 2 минут)..."
-    Start-Sleep -Seconds 15
+    Write-Step "Ожидание HDFS SafeMode (до 2 минут)..."
+    $safeModeOff = $false
+    for ($i = 0; $i -lt 24; $i++) {
+        try {
+            $result = docker exec namenode /opt/hadoop/bin/hdfs dfsadmin -safemode get 2>$null
+            if ($result -and $result -match "Safe mode is off") { $safeModeOff = $true; break }
+        } catch { }
+        Start-Sleep -Seconds 5
+    }
+    if ($safeModeOff) {
+        Write-Ok "HDFS SafeMode: off"
+    } else {
+        Write-Warn "HDFS SafeMode не вышел за 2 минуты"
+    }
+
+    Write-Step "Ожидание YARN (до 2 минут)..."
+    Start-Sleep -Seconds 10
 
     # Проверяем Trino через HTTP
     $trinoReady = $false
@@ -105,6 +121,38 @@ function Start-Cluster {
         Write-Warn "Hue не ответил. Проверь: docker compose logs hue"
     }
 
+    # Проверяем YARN
+    $yarnReady = $false
+    for ($i = 0; $i -lt 12; $i++) {
+        try {
+            $response = Invoke-WebRequest -Uri "http://localhost:8088/" -Method Get -TimeoutSec 2 -ErrorAction SilentlyContinue
+            if ($response.StatusCode -in @(200, 302, 303)) { $yarnReady = $true; break }
+        } catch { }
+        Start-Sleep -Seconds 10
+    }
+
+    if ($yarnReady) {
+        Write-Ok "YARN RM готов"
+    } else {
+        Write-Warn "YARN RM не ответил. Проверь: docker compose logs resourcemanager"
+    }
+
+    # Проверяем Spark History
+    $sparkHistReady = $false
+    for ($i = 0; $i -lt 12; $i++) {
+        try {
+            $response = Invoke-WebRequest -Uri "http://localhost:18080/" -Method Get -TimeoutSec 2 -ErrorAction SilentlyContinue
+            if ($response.StatusCode -in @(200, 302, 303)) { $sparkHistReady = $true; break }
+        } catch { }
+        Start-Sleep -Seconds 10
+    }
+
+    if ($sparkHistReady) {
+        Write-Ok "Spark History готов"
+    } else {
+        Write-Warn "Spark History не ответил. Проверь: docker compose logs spark-history"
+    }
+
     # Итоговый статус
     Write-Step "Статус контейнеров:"
     docker compose ps --format "table {{.Name}}`t{{.Status}}`t{{.Ports}}"
@@ -119,11 +167,6 @@ function Start-Cluster {
     Write-Host "    Spark History: http://localhost:18080" -ForegroundColor White
     Write-Host "    HDFS UI:       http://localhost:9870" -ForegroundColor White
     Write-Host "    Nessie UI:     http://localhost:19120" -ForegroundColor White
-    Write-Host ""
-    Write-Host "SQL-скрипты:" -ForegroundColor Yellow
-    Write-Host "  Hue:  jupyter/work/05_visualization_hue.sql" -ForegroundColor Yellow
-    Write-Host "  Trino: jupyter/work/06_visualization_trino.sql" -ForegroundColor Yellow
-    Write-Host "  Hive:  jupyter/work/07_visualization_hive.sql" -ForegroundColor Yellow
     Write-Host ""
 }
 

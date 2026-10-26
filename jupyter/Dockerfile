@@ -2,7 +2,7 @@ FROM jupyter/pyspark-notebook:latest
 
 USER root
 
-RUN apt-get update && apt-get install -y wget procps && \
+RUN apt-get update && apt-get install -y wget procps netcat-openbsd && \
     rm -rf /var/lib/apt/lists/*
 
 # Iceberg JAR
@@ -14,7 +14,17 @@ RUN mkdir -p /usr/local/spark/jars && \
 RUN wget -q -O /usr/local/spark/jars/nessie-0.92.1.jar \
     https://repo1.maven.org/maven2/org/projectnessie/nessie/0.92.1/nessie-0.92.1.jar || true
 
-ENV HADOOP_CONF_DIR=/etc/hadoop/conf
+# Скачиваем Hadoop client для работы с YARN
+RUN wget -q -O /tmp/hadoop.tar.gz https://archive.apache.org/dist/hadoop/common/hadoop-3.3.6/hadoop-3.3.6.tar.gz && \
+    tar -xzf /tmp/hadoop.tar.gz -C /opt && \
+    mv /opt/hadoop-3.3.6 /opt/hadoop && \
+    rm /tmp/hadoop.tar.gz && \
+    chmod -R 755 /opt/hadoop
+
+ENV PATH=${PATH}:/opt/hadoop/bin:/opt/hadoop/sbin
+ENV HADOOP_HOME=/opt/hadoop
+ENV HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ENV SPARK_HOME=/usr/local/spark
 ENV PYSPARK_PYTHON=python3
 ENV PYSPARK_DRIVER_PYTHON=python3

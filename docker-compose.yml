@@ -228,6 +228,7 @@ services:
     depends_on: [namenode, datanode, nessie, hive-metastore]
     ports:
       - "8889:8888"
+      - "4040:4040"  # Spark UI (local mode)
     volumes:
       - ./jupyter/work:/home/jovyan/work
       - ./jupyter/init_spark.py:/home/jovyan/work/init_spark.py:ro

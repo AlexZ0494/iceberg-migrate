@@ -82,11 +82,23 @@ start_cluster() {
     docker exec namenode /opt/hadoop/bin/hdfs dfs -mkdir -p /user/hive/warehouse
     docker exec namenode /opt/hadoop/bin/hdfs dfs -mkdir -p /warehouse
     docker exec namenode /opt/hadoop/bin/hdfs dfs -mkdir -p /spark-events
-    docker exec namenode /opt/hadoop/bin/hdfs dfs -chmod -R 777 /user/hive /warehouse /spark-events
+    docker exec namenode /opt/hadoop/bin/hdfs dfs -mkdir -p /spark-logs
+    docker exec namenode /opt/hadoop/bin/hdfs dfs -chmod -R 777 /user/hive /warehouse /spark-events /spark-logs
     ok "HDFS-директории созданы"
 
-    step "Ожидание сервисов (до 2 минут)..."
-    sleep 15
+    step "Ожидание HDFS SafeMode (до 2 минут)..."
+    safe_mode=false
+    for i in $(seq 1 24); do
+        safe_mode=$(docker exec namenode /opt/hadoop/bin/hdfs dfsadmin -safemode get 2>/dev/null | grep -o "Safe mode is off" || true)
+        if [ "$safe_mode" = "Safe mode is off" ]; then
+            break
+        fi
+        sleep 5
+    done
+    ok "HDFS SafeMode: off"
+
+    step "Ожидание YARN (до 2 минут)..."
+    sleep 10
 
     # Проверяем Trino через HTTP
     trino_ready=false
@@ -120,6 +132,38 @@ start_cluster() {
         warn "Hue не ответил. Проверь: docker compose logs hue"
     fi
 
+    # Проверяем YARN
+    yarn_ready=false
+    for i in $(seq 1 12); do
+        if curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/ | grep -qE "30[23]|200"; then
+            yarn_ready=true
+            break
+        fi
+        sleep 10
+    done
+
+    if [ "$yarn_ready" = true ]; then
+        ok "YARN RM готов"
+    else
+        warn "YARN RM не ответил. Проверь: docker compose logs resourcemanager"
+    fi
+
+    # Проверяем Spark History
+    spark_hist_ready=false
+    for i in $(seq 1 12); do
+        if curl -s -o /dev/null -w "%{http_code}" http://localhost:18080/ | grep -qE "30[23]|200"; then
+            spark_hist_ready=true
+            break
+        fi
+        sleep 10
+    done
+
+    if [ "$spark_hist_ready" = true ]; then
+        ok "Spark History готов"
+    else
+        warn "Spark History не ответил. Проверь: docker compose logs spark-history"
+    fi
+
     # Итоговый статус
     step "Статус контейнеров:"
     docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
@@ -134,11 +178,6 @@ start_cluster() {
     echo -e "    ${BOLD}Spark History:${NC} http://localhost:18080"
     echo -e "    ${BOLD}HDFS UI:${NC}       http://localhost:9870"
     echo -e "    ${BOLD}Nessie UI:${NC}     http://localhost:19120"
-    echo ""
-    echo -e "    ${YELLOW}SQL-скрипты:${NC}"
-    echo -e "      Hue:  jupyter/work/05_visualization_hue.sql"
-    echo -e "      Trino: jupyter/work/06_visualization_trino.sql"
-    echo -e "      Hive:  jupyter/work/07_visualization_hive.sql"
     echo ""
 }
 
